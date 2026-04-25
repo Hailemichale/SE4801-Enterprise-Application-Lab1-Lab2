@@ -3,8 +3,6 @@
 
 ---
 
-### Student Information
-
 | Name | ID |
 |------|-----|
 | Hailemichale Lijalem | ATE/1051/14 |
