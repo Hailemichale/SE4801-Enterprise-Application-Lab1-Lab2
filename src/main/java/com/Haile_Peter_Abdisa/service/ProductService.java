@@ -1,64 +1,97 @@
 package com.Haile_Peter_Abdisa.service;
 
-import com.Haile_Peter_Abdisa.dto.ProductRequest;
-import com.Haile_Peter_Abdisa.dto.ProductResponse;
+import com.Haile_Peter_Abdisa.dto.request.CreateProductRequest;
+import com.Haile_Peter_Abdisa.dto.response.ProductDTO;
 import com.Haile_Peter_Abdisa.exception.ResourceNotFoundException;
+import com.Haile_Peter_Abdisa.mapper.ProductMapper;
+import com.Haile_Peter_Abdisa.model.Category;
 import com.Haile_Peter_Abdisa.model.Product;
+import com.Haile_Peter_Abdisa.repository.CategoryRepository;
 import com.Haile_Peter_Abdisa.repository.ProductRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Service
+@Transactional
+@RequiredArgsConstructor
+@Slf4j
 public class ProductService {
 
-    private final ProductRepository repo;
+    private final ProductRepository productRepo;
+    private final CategoryRepository categoryRepo;
+    private final ProductMapper mapper;
 
-    public ProductService(ProductRepository repo) {
-        this.repo = repo;
+    // ── Create ──────────────────────────────────────────────────────────
+    public ProductDTO create(CreateProductRequest req) {
+        Category cat = categoryRepo.findById(req.categoryId())
+            .orElseThrow(() -> new ResourceNotFoundException(
+                "Category not found: " + req.categoryId()));
+
+        Product p = Product.builder()
+            .name(req.name())
+            .description(req.description())
+            .price(req.price())
+            .stock(req.stock())
+            .slug(slugify(req.name()))
+            .category(cat)
+            .build();
+
+        return mapper.toDTO(productRepo.save(p));
     }
 
-    // ── Read ─────────────────────────────────────────────────
-    public List<ProductResponse> findAll() {
-        return repo.findAll().stream().map(this::toResponse).toList();
+    // ── Paginated list (the JOIN FETCH query) ──────────────────────────
+    @Transactional(readOnly = true)
+    public Page<ProductDTO> findAll(Pageable pageable) {
+        return productRepo.findAllWithCategory(pageable).map(mapper::toDTO);
     }
 
-    public ProductResponse findById(Long id) {
-        return toResponse(repo.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException(id)));
+    // ── Find by ID ─────────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public ProductDTO findById(Long id) {
+        return productRepo.findById(id)
+            .map(mapper::toDTO)
+            .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + id));
     }
 
-    // ── Create ───────────────────────────────────────────────
-    public ProductResponse create(ProductRequest req) {
-        return toResponse(repo.save(toEntity(req)));
+    // ── Find by Slug ───────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public ProductDTO findBySlug(String slug) {
+        return productRepo.findBySlug(slug)
+            .map(mapper::toDTO)
+            .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + slug));
     }
 
-    // ── Update ───────────────────────────────────────────────
-    public ProductResponse update(Long id, ProductRequest req) {
-        Product existing = repo.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException(id));
-        existing.setName(req.getName());
-        existing.setPrice(req.getPrice());
-        existing.setStockQty(req.getStockQty());
-        existing.setCategory(req.getCategory());
-        return toResponse(repo.save(existing));
+    // ── Search ─────────────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public List<ProductDTO> search(String keyword, BigDecimal maxPrice) {
+        List<Product> results = (keyword != null && !keyword.isBlank())
+            ? productRepo.searchByKeyword(keyword)
+            : productRepo.findAll();
+        return results.stream()
+            .filter(p -> maxPrice == null || p.getPrice().compareTo(maxPrice) <= 0)
+            .map(mapper::toDTO)
+            .toList();
     }
 
-    // ── Delete ───────────────────────────────────────────────
+    // ── Soft delete (updates deleted=true via @SQLDelete) ──────────────
     public void delete(Long id) {
-        if (!repo.existsById(id))
-            throw new ResourceNotFoundException(id);
-        repo.deleteById(id);
+        Product p = productRepo.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + id));
+        productRepo.delete(p);  // fires: UPDATE products SET deleted=TRUE WHERE id=?
+        log.info("Soft-deleted product id={} name={}", p.getId(), p.getName());
     }
 
-    // ── Mapping helpers ───────────────────────────────────────
-    private ProductResponse toResponse(Product p) {
-        return new ProductResponse(p.getId(), p.getName(),
-                                  p.getPrice(), p.getStockQty(), p.getCategory());
-    }
-
-    private Product toEntity(ProductRequest req) {
-        return new Product(req.getName(), req.getPrice(),
-                           req.getStockQty(), req.getCategory());
+    // ── Slug helper ────────────────────────────────────────────────────
+    private String slugify(String name) {
+        return name.toLowerCase()
+            .replaceAll("[^a-z0-9]+", "-")
+            .replaceAll("(^-|-$)", "");
     }
 }
