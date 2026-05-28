@@ -6,19 +6,23 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
-import java.net.URI;
+
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     // ── 404 Not Found ─────────────────────────────────────────
     @ExceptionHandler(ResourceNotFoundException.class)
-    public ProblemDetail handleNotFound(ResourceNotFoundException ex) {
-        ProblemDetail problem = ProblemDetail
-            .forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
-        problem.setType(URI.create("https://api.example.com/errors/not-found"));
-        problem.setTitle("Resource Not Found");
-        return problem;
+    public ResponseEntity<Map<String, Object>> handleNotFound(ResourceNotFoundException ex) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("timestamp", LocalDateTime.now().toString());
+        body.put("status", 404);
+        body.put("error", "Not Found");
+        body.put("message", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
     }
 
     // ── 400 Bad Request — Validation failure ─────────────────
@@ -32,10 +36,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             .findFirst()
             .orElse("Validation failed");
 
-        ProblemDetail problem = ProblemDetail
-            .forStatusAndDetail(HttpStatus.BAD_REQUEST, detail);
-        problem.setType(URI.create("https://api.example.com/errors/validation"));
-        problem.setTitle("Validation Error");
-        return ResponseEntity.badRequest().body(problem);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("timestamp", LocalDateTime.now().toString());
+        body.put("status", 400);
+        body.put("error", "Bad Request");
+        body.put("message", detail);
+        return ResponseEntity.badRequest().body(body);
     }
 }
